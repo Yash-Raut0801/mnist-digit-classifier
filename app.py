@@ -1,29 +1,46 @@
 """
-OPTIONAL BONUS (Step 11): Simple web demo for your digit classifier (PyTorch version).
+Handwritten Digit Recognizer -- Streamlit demo (PyTorch version).
 
 WHAT: A Streamlit app where you draw a digit and see the model predict it live.
 WHY:  For a project submission/demo, a working interface is far more
       convincing than a script full of printed numbers.
 
 Setup:
-    pip install streamlit streamlit-drawable-canvas pillow torch torchvision
+    pip install streamlit streamlit-drawable-canvas pillow torch torchvision pandas
 
 Run:
-    streamlit run app.py
+    python -m streamlit run app.py
 
 Requires 'digit_classifier.pt' to exist (produced by digit_recognition.py).
 """
 
 import streamlit as st
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn as nn
 from PIL import Image, ImageFilter
 from streamlit_drawable_canvas import st_canvas
 
 
-# Model class must match the one used during training exactly, so PyTorch
-# knows how to rebuild the network before loading the saved weights into it.
+# ----------------------------------------------------------------------------
+# PAGE CONFIG -- must be the very first Streamlit command in the script.
+# WHAT: Sets the browser tab title/icon and page width.
+# WHY:  Small touch, but it's the first thing anyone sees -- a default
+#       "app.py" browser tab title looks unfinished.
+# ----------------------------------------------------------------------------
+st.set_page_config(
+    page_title="Digit Recognizer",
+    page_icon="✍️",
+    layout="centered",
+)
+
+
+# ----------------------------------------------------------------------------
+# MODEL DEFINITION
+# Must match the architecture used during training exactly, so PyTorch knows
+# how to rebuild the network before loading the saved weights into it.
+# ----------------------------------------------------------------------------
 class DigitCNN(nn.Module):
     def __init__(self):
         super().__init__()
@@ -44,57 +61,27 @@ class DigitCNN(nn.Module):
         return x
 
 
-st.title("Handwritten Digit Recognizer")
-st.write("Draw a digit (0-9) below and let the model guess it.")
-
-# Load the model once (cached so it doesn't reload on every interaction)
 @st.cache_resource
 def get_model():
     model = DigitCNN()
     model.load_state_dict(torch.load('digit_classifier.pt', map_location='cpu'))
-    model.eval()   # switch to inference mode (disables dropout, etc.)
+    model.eval()
     return model
 
-model = get_model()
-
-# Drawing canvas: 280x280 so the user has room to draw, we'll downscale to 28x28
-canvas_result = st_canvas(
-    fill_color="black",
-    stroke_width=20,
-    stroke_color="white",
-    background_color="black",
-    height=280,
-    width=280,
-    drawing_mode="freedraw",
-    key="canvas",
-)
 
 def preprocess_like_mnist(canvas_image_data):
     """
-    Convert a raw canvas drawing into something that matches MNIST's style
-    as closely as possible. This matters a lot for accuracy -- MNIST digits
-    are cropped to their content, centered, and scaled a specific way, and
-    a live freehand drawing looks nothing like that by default.
-
-    Steps:
-    1. Crop to the actual drawn content (removes empty black space).
-    2. Resize that cropped content to fit inside a 20x20 box, preserving
-       aspect ratio (this matches how MNIST digits were originally built).
-    3. Paste the result into the center of a blank 28x28 image (MNIST always
-       leaves a small black border -- roughly 4px on each side).
-    4. Use LANCZOS resampling (high-quality antialiasing) instead of the
-       default resize, so curves and loops (like in 6, 9, 4, 8) don't turn
-       jagged or break apart when shrunk down.
+    Convert a raw canvas drawing into something that matches MNIST's style:
+    cropped to content, centered, and antialiased down to 28x28 -- this
+    matters a lot for real-world accuracy on freehand drawings.
     """
     img = Image.fromarray((canvas_image_data[:, :, 0]).astype('uint8'))
 
-    # Step 1: crop to the bounding box of non-black (drawn) pixels
     bbox = img.getbbox()
     if bbox is None:
-        return None  # nothing drawn yet
+        return None
     img = img.crop(bbox)
 
-    # Step 2: resize so the longest side becomes 20px, keeping aspect ratio
     width, height = img.size
     if width > height:
         new_width = 20
@@ -104,44 +91,92 @@ def preprocess_like_mnist(canvas_image_data):
         new_width = max(1, int(width * (20 / height)))
     img = img.resize((new_width, new_height), Image.LANCZOS)
 
-    # Step 3: paste centered onto a blank 28x28 black canvas
     final_img = Image.new('L', (28, 28), color=0)
     paste_x = (28 - new_width) // 2
     paste_y = (28 - new_height) // 2
     final_img.paste(img, (paste_x, paste_y))
 
-    # Step 4: slightly thicken the strokes. Shrinking a large freehand
-    # drawing down to 20px can leave strokes only 1px wide, which loses
-    # the loop/curve detail digits like 6, 9, 4, 8 depend on. MaxFilter
-    # brightens each pixel to the max of its neighbors, which -- since our
-    # strokes are white (255) on a black (0) background -- has the effect
-    # of thickening the white strokes slightly.
     final_img = final_img.filter(ImageFilter.MaxFilter(3))
-
     return final_img
 
 
-if canvas_result.image_data is not None:
-    processed_img = preprocess_like_mnist(canvas_result.image_data)
+# ----------------------------------------------------------------------------
+# HEADER
+# ----------------------------------------------------------------------------
+st.title("✍️ Handwritten Digit Recognizer")
+st.caption("A CNN trained on MNIST, running live in your browser via PyTorch + Streamlit.")
+st.divider()
 
-    if processed_img is not None:
-        # Show exactly what the model sees -- extremely useful for debugging
-        st.write("What the model actually sees (28x28):")
-        st.image(processed_img.resize((140, 140), Image.NEAREST))
+model = get_model()
 
-        img_array = np.array(processed_img).astype('float32') / 255.0  # normalize 0-1
+# ----------------------------------------------------------------------------
+# MAIN LAYOUT -- two columns: canvas on the left, results on the right.
+# WHY: Side-by-side layout reads as a deliberate "product" rather than a
+#      vertical stack of unrelated widgets.
+# ----------------------------------------------------------------------------
+col_draw, col_result = st.columns([1, 1], gap="large")
 
-        # PyTorch expects shape: (batch, channels, height, width)
-        img_tensor = torch.from_numpy(img_array).unsqueeze(0).unsqueeze(0)
+with col_draw:
+    st.subheader("Draw a digit")
+    canvas_result = st_canvas(
+        fill_color="black",
+        stroke_width=20,
+        stroke_color="white",
+        background_color="black",
+        height=280,
+        width=280,
+        drawing_mode="freedraw",
+        key=st.session_state.get("canvas_key", "canvas_0"),
+    )
 
-        if st.button("Predict"):
-            with torch.no_grad():
-                output = model(img_tensor)
-                probabilities = torch.softmax(output, dim=1)
-                digit = torch.argmax(probabilities, dim=1).item()
-                confidence = torch.max(probabilities).item() * 100
+    button_col1, button_col2 = st.columns(2)
+    with button_col1:
+        predict_clicked = st.button("🔮 Predict", use_container_width=True, type="primary")
+    with button_col2:
+        if st.button("🗑️ Clear", use_container_width=True):
+            # Changing the canvas widget's key forces Streamlit to create a
+            # brand-new, empty canvas instead of reusing the drawn-on one.
+            current = st.session_state.get("canvas_key", "canvas_0")
+            n = int(current.split("_")[1]) + 1
+            st.session_state["canvas_key"] = f"canvas_{n}"
+            st.rerun()
 
-            st.write(f"### Prediction: {digit}")
-            st.write(f"Confidence: {confidence:.2f}%")
+with col_result:
+    st.subheader("Result")
+
+    if canvas_result.image_data is None or canvas_result.image_data[:, :, 0].max() == 0:
+        st.info("Draw a digit on the left, then click **Predict**.")
     else:
-        st.write("Draw a digit above, then click Predict.")
+        processed_img = preprocess_like_mnist(canvas_result.image_data)
+
+        if processed_img is None:
+            st.info("Draw a digit on the left, then click **Predict**.")
+        else:
+            img_array = np.array(processed_img).astype('float32') / 255.0
+            img_tensor = torch.from_numpy(img_array).unsqueeze(0).unsqueeze(0)
+
+            if predict_clicked:
+                with torch.no_grad():
+                    output = model(img_tensor)
+                    probabilities = torch.softmax(output, dim=1)[0]
+                    digit = int(torch.argmax(probabilities).item())
+                    confidence = float(torch.max(probabilities).item()) * 100
+
+                st.metric(label="Predicted digit", value=str(digit))
+                st.progress(min(int(confidence), 100), text=f"Confidence: {confidence:.1f}%")
+
+                st.write("**Confidence across all digits:**")
+                probs_df = pd.DataFrame({
+                    "Digit": [str(i) for i in range(10)],
+                    "Confidence": probabilities.numpy(),
+                }).set_index("Digit")
+                st.bar_chart(probs_df)
+            else:
+                st.info("Click **Predict** to see the model's guess.")
+
+            with st.expander("🔍 Debug: what the model actually sees (28x28)"):
+                st.image(processed_img.resize((140, 140), Image.NEAREST))
+                st.caption("If this looks unrecognizable, try drawing bigger and more centered.")
+
+st.divider()
+st.caption("Built with PyTorch + Streamlit • Trained on the MNIST dataset (~99% test accuracy)")
