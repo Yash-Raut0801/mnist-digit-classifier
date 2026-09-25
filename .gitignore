@@ -1,0 +1,26 @@
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# MNIST dataset (auto-downloaded by torchvision on first run)
+data/
+
+# Streamlit
+.streamlit/
+
+# OS-specific junk
+.DS_Store
+Thumbs.db
+
+# IDE settings
+.vscode/
+.idea/
+
+# Sample output image generated during training
+sample_digits.png
