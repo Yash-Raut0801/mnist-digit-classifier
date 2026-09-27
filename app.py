@@ -117,7 +117,7 @@ model = get_model()
 col_draw, col_result = st.columns([1, 1], gap="large")
 
 with col_draw:
-    st.subheader("Draw a digit")
+    st.subheader("Draw a digit(0-9)")
     canvas_result = st_canvas(
         fill_color="black",
         stroke_width=20,
