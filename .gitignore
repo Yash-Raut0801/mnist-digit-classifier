@@ -11,8 +11,6 @@ __pycache__/
 # MNIST dataset (auto-downloaded by torchvision on first run)
 data/
 
-# Streamlit
-.streamlit/
 
 # OS-specific junk
 .DS_Store
