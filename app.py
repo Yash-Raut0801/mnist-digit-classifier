@@ -126,6 +126,7 @@ with col_draw:
         height=280,
         width=280,
         drawing_mode="freedraw",
+        return_image_data=True,
         key=st.session_state.get("canvas_key", "canvas_0"),
     )
 
